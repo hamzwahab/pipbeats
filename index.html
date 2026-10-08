@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0ea5e9">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>PipBeats</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0}
+body{font-family:system-ui,-apple-system,Roboto,sans-serif;background:#0b1d3a;color:#fff;overflow:hidden}
+#app{position:relative;height:100%;max-width:480px;margin:0 auto;background:linear-gradient(#0ea5e9,#7dd3fc 55%,#bae6fd);overflow:hidden;padding-top:env(safe-area-inset-top,0px)}
+.top{position:absolute;top:calc(12px + env(safe-area-inset-top,0px));left:12px;right:12px;display:flex;justify-content:space-between;align-items:center;z-index:5}
+.pill{background:#ef4444;color:#fff;border-radius:20px;padding:6px 14px;font-weight:700;font-size:14px}
+.src{font-size:11px;font-weight:800;padding:4px 10px;border-radius:12px;background:#0006;color:#fff}
+.logbtn{background:#fde68a;color:#78350f;border:0;border-radius:50%;width:40px;height:40px;font-weight:800;font-size:11px}
+.sea{position:absolute;bottom:0;left:0;right:0;height:26%;background:linear-gradient(#22d3ee,#0369a1)}
+.island{position:absolute;bottom:8%;left:50%;transform:translateX(-50%);width:70%;height:18%;background:#15803d;border-radius:50% 50% 0 0;box-shadow:inset 0 10px 0 #4ade80}
+.chute{position:absolute;text-align:center;transition:all .6s ease}
+.chute svg{display:block;margin:0 auto}
+.tag{background:#fff;color:#111;border-radius:6px;padding:2px 8px;font-weight:800;display:inline-block}
+.fresh{display:inline-block;margin-top:6px;padding:3px 10px;border-radius:6px;font-size:12px;font-weight:800;color:#fff}
+.bear{background:#b91c1c}.bull{background:#15803d}
+.ctrl{position:absolute;bottom:calc(22px + env(safe-area-inset-bottom,0px));left:0;right:0;display:flex;justify-content:center;align-items:center;gap:14px;z-index:5}
+.tf{background:#b45309;color:#fff;font-size:30px;font-weight:900;padding:8px 28px;border-radius:12px;border:3px solid #fde68a;min-width:120px;text-align:center}
+.arrow{background:#f97316;border:0;color:#fff;width:48px;height:48px;border-radius:50%;font-size:22px;font-weight:900}
+#msg{position:absolute;top:45%;left:0;right:0;text-align:center;font-weight:800;color:#0c4a6e;padding:0 24px;z-index:4}
+#log{position:absolute;inset:0;background:rgba(10,20,40,.97);z-index:10;padding:64px 16px 16px;overflow:auto;display:none}
+#log h2{margin:0 0 12px}
+.row{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid #ffffff22;font-size:14px}
+.x{position:absolute;top:14px;right:14px;background:#ffffff22;color:#fff;border:0;border-radius:50%;width:38px;height:38px;font-size:18px}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="top"><div class="pill" id="tfPill">M15</div><div class="src" id="src">...</div><button class="logbtn" id="logBtn">LOG</button></div>
+  <div id="msg"></div>
+  <div id="sky"></div>
+  <div class="sea"></div><div class="island"></div>
+  <div class="ctrl"><button class="arrow" id="prev">◀</button><div class="tf" id="tf">M15</div><button class="arrow" id="next">▶</button></div>
+  <div id="log"><button class="x" id="closeLog">✕</button><h2>Activity Log</h2><div id="logRows"></div></div>
+</div>
+<script src="engine.js"></script>
+<script>
+var tfs=["M5","M15","M30","H1"],ti=1,state=null;
+var $=function(i){return document.getElementById(i)};
+function chute(s,c){return '<svg width="'+s+'" height="'+(s*.55)+'" viewBox="0 0 120 66"><path d="M4 40 Q60 -22 116 40 Q100 30 88 40 Q74 28 60 40 Q46 28 32 40 Q18 30 4 40Z" fill="'+c+'"/><path d="M6 40 L56 64 M34 38 L58 64 M86 38 L62 64 M114 40 L64 64" stroke="#7c4a1e" stroke-width="1.5" fill="none"/></svg>'}
+function stars(n){return n?'<div style="color:#fde047;font-size:16px;text-shadow:0 1px 2px #0008">'+'★'.repeat(n)+'</div>':''}
+function render(){
+  var t=tfs[ti];$("tf").textContent=t;$("tfPill").textContent=t;
+  if(!state){$("sky").innerHTML="";return}
+  $("src").textContent=state.source==="live"?"● LIVE":"DEMO DATA";
+  $("msg").textContent=!state.market_open?"Market closed - activity paused":(state.currencies.length?"":"Quiet market - no spikes");
+  var W=$("app").clientWidth,H=$("app").clientHeight,list=state.currencies.slice(0,6);
+  var spots=[[.05,.6],[.64,.56],[.1,.36],[.68,.32],[.38,.68]],h="";
+  list.forEach(function(d,i){
+    var big=i===0,s=big?W*.5:W*.22,x=big?W*.25:spots[i-1][0]*W,y=big?H*.12:spots[i-1][1]*H*.9-s*.3;
+    var em=d.dir==="bear"?"🐻":"🐂";
+    h+='<div class="chute" style="left:'+x+'px;top:'+y+'px;width:'+s+'px;opacity:'+(big?1:.88)+'">'+
+    (big?'<div style="font-size:'+(s*.2)+'px;font-weight:900;margin-bottom:-'+(s*.38)+'px;position:relative;z-index:2;text-shadow:0 2px 3px #0006">'+d.age+'<br><span style="font-size:'+(s*.09)+'px">minutes ago</span></div>':
+    '<div style="font-size:'+(s*.17)+'px;font-weight:900;margin-bottom:-'+(s*.28)+'px;position:relative;z-index:2">'+d.age+'m</div>')+
+    chute(s,big?"#f97316":"#c2410c")+'<div style="font-size:'+(s*.28)+'px;line-height:1">'+em+'</div>'+
+    '<div class="tag" style="font-size:'+(big?15:12)+'px">'+d.cur+'</div>'+stars(d.stars)+
+    (big?'<div class="tag" style="font-size:11px;margin-top:4px;background:#ffffffcc">'+d.pairs.join(" · ")+'</div><br><span class="fresh '+d.dir+'">Fresh '+(d.dir==="bear"?"Bear":"Bull")+'</span>':'')+'</div>';
+  });
+  $("sky").innerHTML=h;
+  var r="";state.pairs.forEach(function(p){r+='<div class="row"><span>'+p.pair+' · '+p.ratio+'x</span><span>'+(p.dir==="bear"?"🐻 Bear":"🐂 Bull")+' · '+p.age+' min ago</span></div>'});
+  $("logRows").innerHTML=r||"<p>Koi spike nahi.</p>";
+}
+function load(){
+  var t=tfs[ti];
+  getActivity(t).then(function(j){if(j.tf===tfs[ti]){state=j;render()}})
+  .catch(function(){$("msg").textContent="Data load nahi hua";});
+}
+function go(d){ti=(ti+tfs.length+d)%tfs.length;state=null;render();load()}
+$("prev").onclick=function(){go(-1)};$("next").onclick=function(){go(1)};
+$("logBtn").onclick=function(){$("log").style.display="block"};
+$("closeLog").onclick=function(){$("log").style.display="none"};
+window.addEventListener("resize",render);
+setInterval(load,30000);load();render();
+</script>
+</body>
+</html>
