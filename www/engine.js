@@ -1,8 +1,8 @@
-var CFG={SPIKE:1.5,ATR_N:14,LOOK:12,RECENT:4};
+var CFG={SPIKE:2.0,LOOK:12,CSPIKE:0.8,STARS:[1.0,1.5,2.0],MINBARS:50};
 var CUR=["USD","EUR","GBP","JPY","AUD","NZD","CAD","CHF"];
 var PAIRS="EURUSD GBPUSD AUDUSD NZDUSD USDJPY USDCHF USDCAD EURGBP EURJPY EURCHF EURAUD EURNZD EURCAD GBPJPY GBPCHF GBPAUD GBPNZD GBPCAD AUDJPY AUDCHF AUDNZD AUDCAD NZDJPY NZDCHF NZDCAD CADJPY CADCHF CHFJPY".split(" ");
 var EXTRA={XAUUSD:"GC=F"};
-var TFS={M5:{i:"5m",r:"5d",m:5},M15:{i:"15m",r:"5d",m:15},M30:{i:"30m",r:"5d",m:30},H1:{i:"60m",r:"10d",m:60}};
+var TFS={M5:{i:"5m",r:"7d",m:5},M15:{i:"15m",r:"30d",m:15},M30:{i:"30m",r:"30d",m:30},H1:{i:"60m",r:"60d",m:60}};
 
 function parseYahoo(j){
   var r=j.chart.result[0],q=r.indicators.quote[0],out=[];
@@ -12,42 +12,61 @@ function parseYahoo(j){
   });
   return out;
 }
-function analyzePair(bars,nowSec){
-  var n=bars.length,N=CFG.ATR_N;
-  if(n<N+2)return null;
+function hourOf(t){return new Date(t*1000).getUTCHours()}
+function baselines(bars){
+  var sum={},cnt={},tot=0;
+  bars.forEach(function(b){var a=Math.abs(Math.log(b.c/b.o)),h=hourOf(b.t);sum[h]=(sum[h]||0)+a;cnt[h]=(cnt[h]||0)+1;tot+=a});
+  var all=(tot/bars.length)||1e-9,out={};
+  for(var h=0;h<24;h++)out[h]=(cnt[h]>=5&&sum[h]>0)?sum[h]/cnt[h]:all;
+  return out;
+}
+function normMoves(bars){
+  var bl=baselines(bars),m={};
+  bars.forEach(function(b){m[b.t]=Math.log(b.c/b.o)/(bl[hourOf(b.t)]||1e-9)});
+  return m;
+}
+function spikeOf(bars,m,nowSec){
   var best=null;
-  for(var i=Math.max(N,n-CFG.LOOK);i<n;i++){
-    var s=0;for(var k=i-N;k<i;k++)s+=bars[k].h-bars[k].l;
-    var avg=s/N,rg=bars[i].h-bars[i].l;
-    if(avg>0&&rg/avg>=CFG.SPIKE)best={i:i,ratio:rg/avg};
+  for(var i=Math.max(0,bars.length-CFG.LOOK);i<bars.length;i++){
+    var z=m[bars[i].t];if(Math.abs(z)>=CFG.SPIKE)best={t:bars[i].t,z:z};
   }
   if(!best)return null;
-  var b=bars[best.i];
-  return{age:Math.max(1,Math.floor((nowSec-b.t)/60)),dir:b.c>=b.o?"bull":"bear",ratio:Math.round(best.ratio*100)/100};
+  return{age:Math.max(1,Math.floor((nowSec-best.t)/60)),dir:best.z>=0?"bull":"bear",ratio:Math.round(Math.abs(best.z)*100)/100};
 }
 function buildResult(tf,series,nowSec,source){
-  var mins=TFS[tf].m,last=0,pairs=[];
+  var last=0,pairs=[],zs={};
   Object.keys(series).forEach(function(p){
-    var bars=series[p];if(!bars||!bars.length)return;
+    var bars=series[p];if(!bars||bars.length<CFG.MINBARS)return;
     last=Math.max(last,bars[bars.length-1].t);
-    var r=analyzePair(bars,nowSec);if(r){r.pair=p;pairs.push(r)}
+    var m=normMoves(bars);zs[p]=m;
+    var r=spikeOf(bars,m,nowSec);if(r){r.pair=p;pairs.push(r)}
   });
   pairs.sort(function(a,b){return a.age-b.age});
-  var cur={};CUR.forEach(function(c){cur[c]={cur:c,net:0,age:1e9,n:0,pairs:[]}});
-  pairs.forEach(function(r){
-    if(PAIRS.indexOf(r.pair)<0)return;
-    var sg=r.dir==="bull"?1:-1;
-    [[r.pair.slice(0,3),sg],[r.pair.slice(3),-sg]].forEach(function(x){
-      var e=cur[x[0]];e.net+=x[1];e.age=Math.min(e.age,r.age);e.pairs.push(r.pair);
-      if(r.age<=CFG.RECENT*mins)e.n++;
+  var ref=series.EURUSD&&series.EURUSD.length?series.EURUSD:null,out=[];
+  if(ref){
+    var tl=ref.slice(-CFG.LOOK).map(function(b){return b.t});
+    CUR.forEach(function(c){
+      var best=null;
+      tl.forEach(function(t){
+        var per=[];
+        PAIRS.forEach(function(p){
+          if(!zs[p]||zs[p][t]===undefined)return;
+          var sg=p.slice(0,3)===c?1:p.slice(3)===c?-1:0;
+          if(sg)per.push({p:p,v:sg*zs[p][t]});
+        });
+        if(per.length<4)return;
+        var cs=per.reduce(function(a,x){return a+x.v},0)/per.length;
+        if(Math.abs(cs)>=CFG.CSPIKE)best={t:t,cs:cs,per:per};
+      });
+      if(!best)return;
+      var a=Math.abs(best.cs);
+      best.per.sort(function(x,y){return Math.abs(y.v)-Math.abs(x.v)});
+      out.push({cur:c,age:Math.max(1,Math.floor((nowSec-best.t)/60)),dir:best.cs>=0?"bull":"bear",
+        stars:a>=CFG.STARS[2]?3:a>=CFG.STARS[1]?2:a>=CFG.STARS[0]?1:0,
+        pairs:best.per.slice(0,3).map(function(x){return x.p})});
     });
-  });
-  var out=[];
-  CUR.forEach(function(c){
-    var e=cur[c];if(!e.pairs.length)return;
-    out.push({cur:c,age:e.age,dir:e.net>=0?"bull":"bear",stars:e.n>=6?3:e.n>=5?2:e.n>=3?1:0,pairs:e.pairs.slice(0,3)});
-  });
-  out.sort(function(a,b){return a.age-b.age});
+    out.sort(function(a,b){return a.age-b.age});
+  }
   return{tf:tf,source:source,market_open:(nowSec-last)<3*3600,currencies:out,pairs:pairs};
 }
 function synthetic(mins){
@@ -72,11 +91,11 @@ async function getActivity(tf){
   var syms={};PAIRS.forEach(function(p){syms[p]=p+"=X"});Object.keys(EXTRA).forEach(function(k){syms[k]=EXTRA[k]});
   var series={},ok=0;
   await Promise.all(Object.keys(syms).map(async function(p){
-    try{var b=await fetchOne(syms[p],tf);if(b.length>CFG.ATR_N+2){series[p]=b;ok++}}catch(e){}
+    try{var b=await fetchOne(syms[p],tf);if(b.length>=CFG.MINBARS){series[p]=b;ok++}}catch(e){}
   }));
   var source="live";
   if(ok<10){source="demo";series={};PAIRS.concat(Object.keys(EXTRA)).forEach(function(p){series[p]=synthetic(TFS[tf].m)})}
   var v=buildResult(tf,series,Math.floor(Date.now()/1000),source);
   _cache[tf]={at:now,v:v};return v;
 }
-if(typeof module!=="undefined")module.exports={buildResult:buildResult,analyzePair:analyzePair,parseYahoo:parseYahoo,synthetic:synthetic,PAIRS:PAIRS,TFS:TFS};
+if(typeof module!=="undefined")module.exports={buildResult:buildResult,parseYahoo:parseYahoo,synthetic:synthetic,PAIRS:PAIRS,TFS:TFS};
